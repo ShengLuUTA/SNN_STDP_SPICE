@@ -1,0 +1,44 @@
+`include "constants.vams"
+`include "disciplines.vams"
+
+module edge_to_pulse(in, out);
+    input in;
+    output out;
+
+    electrical in, out;
+
+    // ===== 参数 =====
+    parameter real vth   = 0.5;     // 上升沿检测阈值
+    parameter real vhigh = 1.0;     // 输出脉冲幅度
+    parameter real width = 1u;      // 脉冲宽度
+    parameter real trise = 1n;      // 上升时间（避免硬跳变）
+    parameter real tfall = 1n;      // 下降时间
+
+    // ===== 内部变量 =====
+    real t_last;     // 上一次触发时间
+    real state;      // 当前输出状态（0 or 1）
+
+    analog begin
+		$bound_step(1e-6);
+        @(initial_step) begin
+            t_last = -1;
+            state  = 0;
+        end
+
+        // ===== 上升沿检测 =====
+        @(cross(V(in) - vth, +1)) begin
+            t_last = $abstime;
+            state  = 1;
+        end
+
+        // ===== 宽度控制（单稳态）=====
+        if (state == 1 && ($abstime - t_last) >= width) begin
+            state = 0;
+        end
+
+        // ===== 输出（带平滑过渡）=====
+        V(out) <+ transition(state ? vhigh : 0, 0, trise, tfall);
+
+    end
+
+endmodule

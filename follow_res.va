@@ -1,0 +1,22 @@
+`include "constants.vams"
+`include "disciplines.vams"
+
+module follow_res(p, n, ctrl);
+    inout p, n;        // 电阻两端
+    input ctrl;        // 控制端：输入 RRAM 的 R_out 电压
+    electrical p, n, ctrl;
+
+    real Rval;
+
+    analog begin
+		$bound_step(1e-6);
+        // ctrl 节点电压 = RRAM 的电阻值（单位 Volt = Ohm）
+        Rval = V(ctrl);
+
+        // 防止除零
+        if (Rval < 1.0) Rval = 1.0;
+
+        // 电阻行为：I = V / R
+        I(p, n) <+ V(p, n) / Rval;
+    end
+endmodule

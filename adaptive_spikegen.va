@@ -1,0 +1,206 @@
+`include "constants.vams"
+`include "disciplines.vams"
+
+// Resistance-adaptive version of spikegen for the synaptic RRAM path.
+//
+// R_out represents the instantaneous RRAM resistance in volts (1 V = 1 ohm).
+// At every falling input edge, the module infers the RRAM gap from R_out and
+// solves the nonlinear RRAM state equation for the ramp-start voltage.  The
+// selected voltage satisfies
+//
+//   G*sinh(kappa(gap)*|a|)
+//       = G_ref*sinh(kappa(gap_ref)*|a_ref|),
+//
+// which makes the instantaneous conductance update dG/dt equal at different
+// gaps. This is the exact nonlinear form of the older |a| proportional to R
+// approximation. A smaller resistance therefore receives a smaller voltage.
+module adaptive_spikegen(in, r_ctrl, out);
+    input in;
+    input r_ctrl;
+    output out;
+    electrical in, r_ctrl, out;
+
+    parameter real vth      = 0.5;
+    parameter real a_ref    = -0.20;
+    parameter real b        = 0.0;
+    parameter real Tr       = 3u from (0:inf);
+    parameter real r_ref    = 263244.0 from (0:inf);
+    parameter real r_floor  = 1.0 from (0:inf);
+    parameter real a_min_mag = 0.01 from [0:inf);
+    parameter real a_max_mag = 0.50 from (0:inf);
+
+    // RRAM parameters used to reconstruct gap and field enhancement. Keep
+    // these synchronized with rram.va when that device model is changed.
+    parameter real rram_I0 = 6.14e-5 from (0:inf);
+    parameter real rram_g0 = 2.7505e-10 from (0:inf);
+    parameter real rram_V0 = 0.43 from (0:inf);
+    parameter real rram_Vread = 0.1 from (0:inf);
+    parameter real rram_gap_min = 0.9e-9 from (0:inf);
+    parameter real rram_gap_max = 1.1e-9 from (rram_gap_min:inf);
+    parameter real rram_gamma0 = 16.5 from (0:inf);
+    parameter real rram_beta = 1.25 from (0:inf);
+    parameter real rram_g1 = 1e-9 from (0:inf);
+    parameter real rram_a0 = 0.25e-9 from (0:inf);
+    parameter real rram_L = 5e-9 from (0:inf);
+    parameter real model_temperature = 298.0 from (0:inf);
+    parameter real set_dg_equalization_exponent = 1.61 from (0:inf);
+    parameter real reset_dg_equalization_exponent = 2.0 from (0:inf);
+    parameter real dg_equalization_curvature = 0.30 from [0:inf);
+    parameter real pre_high_ref = 1.2 from (0:inf);
+    parameter real post_high_ref = 1.0 from (0:inf);
+    parameter real post_a_ref = -0.20;
+
+    real t_start;
+    real ramp_on;
+    real dt;
+    real x;
+    real resistance;
+    real conductance;
+    real a_magnitude;
+    real a_start;
+    real gap_ref;
+    real gamma_ref;
+    real kappa_ref;
+    real thermal_voltage;
+    real read_factor;
+    real pass_high;
+    real pass_gain;
+    real desired_net_voltage;
+
+    analog function real voltage_for_constant_dg;
+        input resistance_value;
+        input reference_kappa;
+        input voltage_thermal;
+        input factor_read;
+        input reference_voltage;
+        input equalization_exponent;
+        real resistance_value;
+        real reference_kappa;
+        real voltage_thermal;
+        real factor_read;
+        real reference_voltage;
+        real equalization_exponent;
+        real conductance_value;
+        real gap_value;
+        real gamma_value;
+        real kappa_value;
+        real sinh_target;
+        real resistance_ratio;
+        real log_resistance_ratio;
+        begin
+            conductance_value = 1.0 / resistance_value;
+            gap_value = -rram_g0 * ln(conductance_value / factor_read);
+            if (gap_value < rram_gap_min)
+                gap_value = rram_gap_min;
+            else if (gap_value > rram_gap_max)
+                gap_value = rram_gap_max;
+
+            gamma_value = rram_gamma0
+                          - rram_beta * pow(gap_value / rram_g1, 3);
+            kappa_value = gamma_value * rram_a0 / rram_L / voltage_thermal;
+            resistance_ratio = resistance_value / r_ref;
+            log_resistance_ratio = ln(resistance_ratio);
+            sinh_target = pow(resistance_ratio, equalization_exponent)
+                          * exp(-dg_equalization_curvature
+                                * log_resistance_ratio
+                                * log_resistance_ratio)
+                          * sinh(reference_kappa * reference_voltage);
+            // asinh(x) = ln(x + sqrt(x^2 + 1)); sinh_target is nonnegative.
+            voltage_for_constant_dg =
+                ln(sinh_target + sqrt(sinh_target * sinh_target + 1.0))
+                / kappa_value;
+        end
+    endfunction
+
+    analog begin
+        $bound_step(1u);
+
+        @(initial_step) begin
+            t_start = 0.0;
+            ramp_on = 0.0;
+            dt = 0.0;
+            x = 0.0;
+            resistance = r_ref;
+            conductance = 1.0 / r_ref;
+            thermal_voltage = 8.617333262e-5 * model_temperature;
+            read_factor = rram_I0 * sinh(rram_Vread / rram_V0)
+                          / rram_Vread;
+            gap_ref = -rram_g0 * ln(1.0 / r_ref / read_factor);
+            if (gap_ref < rram_gap_min)
+                gap_ref = rram_gap_min;
+            else if (gap_ref > rram_gap_max)
+                gap_ref = rram_gap_max;
+            gamma_ref = rram_gamma0
+                        - rram_beta * pow(gap_ref / rram_g1, 3);
+            kappa_ref = gamma_ref * rram_a0 / rram_L / thermal_voltage;
+            desired_net_voltage = voltage_for_constant_dg(
+                resistance, kappa_ref, thermal_voltage, read_factor,
+                post_high_ref + ((a_ref < 0.0) ? -a_ref : a_ref),
+                reset_dg_equalization_exponent
+            );
+            a_magnitude = desired_net_voltage - post_high_ref;
+            if (a_magnitude < a_min_mag)
+                a_magnitude = a_min_mag;
+            else if (a_magnitude > a_max_mag)
+                a_magnitude = a_max_mag;
+            a_start = (a_ref < 0.0) ? -a_magnitude : a_magnitude;
+            pass_high = pre_high_ref;
+            pass_gain = 1.0;
+        end
+
+        @(cross(V(in) - vth, +1)) begin
+            resistance = V(r_ctrl);
+            if (resistance < r_floor)
+                resistance = r_floor;
+            desired_net_voltage = voltage_for_constant_dg(
+                resistance, kappa_ref, thermal_voltage, read_factor,
+                pre_high_ref + ((post_a_ref < 0.0) ? -post_a_ref : post_a_ref),
+                set_dg_equalization_exponent
+            );
+            pass_high = desired_net_voltage
+                        - ((post_a_ref < 0.0) ? -post_a_ref : post_a_ref);
+            if (pass_high < vth)
+                pass_high = vth;
+            pass_gain = pass_high / pre_high_ref;
+        end
+
+        @(cross(V(in) - vth, -1)) begin
+            // Snapshot R at the start of this programming ramp.  Keeping the
+            // snapshot fixed avoids algebraic feedback inside a single ramp.
+            resistance = V(r_ctrl);
+            if (resistance < r_floor)
+                resistance = r_floor;
+            conductance = 1.0 / resistance;
+            desired_net_voltage = voltage_for_constant_dg(
+                resistance, kappa_ref, thermal_voltage, read_factor,
+                post_high_ref + ((a_ref < 0.0) ? -a_ref : a_ref),
+                reset_dg_equalization_exponent
+            );
+            a_magnitude = desired_net_voltage - post_high_ref;
+            if (a_magnitude < a_min_mag)
+                a_magnitude = a_min_mag;
+            else if (a_magnitude > a_max_mag)
+                a_magnitude = a_max_mag;
+
+            a_start = (a_ref < 0.0) ? -a_magnitude : a_magnitude;
+            t_start = $abstime;
+            ramp_on = 1.0;
+        end
+
+        dt = $abstime - t_start;
+        if (ramp_on != 0.0) begin
+            if (dt < Tr)
+                x = dt / Tr;
+            else begin
+                x = 1.0;
+                ramp_on = 0.0;
+            end
+        end else begin
+            x = 0.0;
+        end
+
+        V(out) <+ ((ramp_on != 0.0)
+                   ? (a_start + (b - a_start) * x)
+                   : V(in) * pass_gain);
+    end
+endmodule

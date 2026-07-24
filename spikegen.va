@@ -1,0 +1,51 @@
+`include "constants.vams"
+`include "disciplines.vams"
+
+module spikegen(in, out);
+
+input in;
+output out;
+electrical in, out;
+
+parameter real vth = 0.5;
+parameter real a   = 0.0;
+parameter real b   = 1.0;
+parameter real Tr  = 10n;
+
+real t_start;
+real ramp_on;
+real dt;
+real x;
+
+analog begin
+	$bound_step(1e-6);
+    @(initial_step) begin
+        ramp_on = 0;
+        t_start = 0;
+        dt = 0;
+        x = 0;
+    end
+
+    @(cross(V(in)-vth, -1)) begin
+        t_start = $abstime;
+        ramp_on = 1;
+    end
+
+    dt = $abstime - t_start;
+
+    if (ramp_on) begin
+        if (dt < Tr)
+            x = dt / Tr;   // 0 → 1
+        else begin
+            x = 1;
+            ramp_on = 0;
+        end
+    end else begin
+        x = 0;
+    end
+
+    V(out) <+ (ramp_on ? (a + (b-a)*x) : V(in));
+
+end
+
+endmodule
