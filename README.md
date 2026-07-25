@@ -16,10 +16,14 @@ laterally inhibited neurons.
   <img src="neuron_4_weights.gif" width="420" alt="Animated RRAM conductance map for neuron 4">
 </p>
 
-<p align="center">
+<p align="left">
   <em>Time-resolved RRAM conductance map for neuron 4. This representative
   animation uses the supported 8×8 compatibility mode; new default runs
   produce 16×16 maps.</em>
+</p>
+
+<p align="left">
+  <img src="neuron_4.png" width="420" alt="Animated RRAM conductance map for neuron 4">
 </p>
 
 ## What the project implements
