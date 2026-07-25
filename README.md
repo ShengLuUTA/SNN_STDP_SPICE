@@ -13,7 +13,7 @@ laterally inhibited neurons.
 ## Demo
 
 <p align="left">
-  <img src="neuron_4_weights.gif" width="420" alt="Animated RRAM conductance map for neuron 4">
+  <img src="neuron_weights_grid.gif" width="1000" alt="Animated RRAM conductance map for neuron 4">
 </p>
 
 <p align="left">
