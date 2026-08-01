@@ -201,26 +201,6 @@ Characterize the STDP timing/gap surface:
 python3 plot_stdp_window.py --delta-min-us -4 --delta-max-us 4 --delta-step-us 0.25 --gap-min-nm 0.9 --gap-max-nm 1.1 --gap-step-nm 0.025 --plot-metric conductance --learning-rate-scale 0.20 --positive-dt-dg-ratio 0.40 --no-show
 ```
 
-## Project layout
-
-| Path | Role |
-|---|---|
-| `Full/main_encoding.py` | MNIST resizing, ordered sample selection, Poisson encoding, and compact PWL generation |
-| `Full/main_stdp.py` | Network generation, Spectre execution, raw-data parsing, and PNG/GIF plotting |
-| `Full/plot_stdp_window.py` | Independent timing and initial-gap sweep |
-| `Full/rram.va` | Base electrothermal RRAM model |
-| `Full/rram_neuron_freeze.va` | Resettable/freezeable RRAM state and reached-count contribution |
-| `Full/rram_neuron_control.va` | Winner selection, persistent freeze, and competitor-reset arbitration |
-| `Full/adaptive_spikegen.va` | Resistance-aware synaptic programming waveform |
-| `Full/freeze_spikegen.va` | Post-synaptic waveform with persistent freeze gating |
-| `Full/spikegen.va` | Original two-terminal generator retained for isolated STDP sweeps |
-| `Full/import_data.py` | Spectre Nutmeg ASCII reader and CSV exporter |
-| `Full/commands.txt` | Extended command examples and parameter notes |
-
-Generated training artifacts are written to `Full/temp/`, including the
-Spectre deck, raw output, run log, static PNG summaries, and animated RRAM
-weight maps. See [Full/README_SPECTRE.md](Full/README_SPECTRE.md) for detailed
-implementation and simulator-option notes.
 
 ## Current scope
 
