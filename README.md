@@ -1,5 +1,11 @@
 # RRAM–STDP Spiking Neural Network in Cadence Spectre
 
+<p align="left">
+  <small><strong>
+  Research-use notice: This repository is publicly accessible for reading and evaluation only. Copying, redistribution, or reuse of the source code, in whole or in part, without prior written permission from the authors is prohibited.
+  </strong></small>
+</p>
+
 This project is a circuit-level spiking neural network (SNN) simulator built
 around physical RRAM synapses, analog integrate-and-fire neurons, and
 spike-timing-dependent plasticity (STDP). A Python 3 workflow converts MNIST
@@ -13,8 +19,9 @@ resistance-adaptive programming pulses, asymmetric SET/RESET learning,
 competitive neuron freezing, selective waveform saving, and reusable result
 plotting.
 
-<p align="center">
-  <img src="figures/rram_weight_evolution.gif" width="650" alt="Animated 16 by 16 RRAM conductance map during STDP training">
+<p align="left">
+  <img src="figures/neuron_1_weights.gif" width="400" alt="Animated 16 by 16 RRAM conductance map during STDP training">
+  <img src="figures/neuron_2_weights.gif" width="400" alt="Animated 16 by 16 RRAM conductance map during STDP training">
 </p>
 
 <p align="center"><em>Time-resolved RRAM conductance map from a representative 16×16 training run.</em></p>
@@ -84,8 +91,9 @@ network.
 
 ### Learned winner-neuron state
 
-<p align="center">
-  <img src="figures/winner_neuron_result.png" width="720" alt="Winner neuron RRAM conductance map, conductance evolution, and membrane voltage">
+<p align="left">
+  <img src="figures/neuron_1.png" width="400" alt="Winner neuron RRAM conductance map, conductance evolution, and membrane voltage">
+  <img src="figures/neuron_2.png" width="400" alt="Winner neuron RRAM conductance map, conductance evolution, and membrane voltage">
 </p>
 
 The static summary combines the final 16×16 conductance map, all device
@@ -94,8 +102,8 @@ animated figure at the top shows how this map develops over simulation time.
 
 ### Voltage and conductance of one physical synapse
 
-<p align="center">
-  <img src="figures/rram_device_waveform.png" width="900" alt="Input spike, neuron output, voltage across one RRAM, and conductance evolution">
+<p align="left">
+  <img src="figures/rram_device_waveform.png" width="600" alt="Input spike, neuron output, voltage across one RRAM, and conductance evolution">
 </p>
 
 This diagnostic view connects the abstract STDP update to the simulated
@@ -104,8 +112,8 @@ one RRAM, and the resulting conductance trajectory.
 
 ### Two-dimensional physical STDP window
 
-<p align="center">
-  <img src="figures/stdp_conductance_window.png" width="1000" alt="RRAM conductance change versus timing difference and initial gap">
+<p align="left">
+  <img src="figures/stdp_conductance_window.png" width="600" alt="RRAM conductance change versus timing difference and initial gap">
 </p>
 
 The standalone sweep measures `delta-G` versus `t_post - t_pre` and initial
