@@ -1,271 +1,223 @@
-# RRAM-Based STDP Spiking Neural Network
+# RRAM–STDP Spiking Neural Network in Cadence Spectre
 
-A circuit-level spiking neural network (SNN) simulator built with Cadence
-Spectre, Verilog-A RRAM synapses, analog integrate-and-fire neurons, and
-spike-timing-dependent plasticity (STDP).
+This project is a circuit-level spiking neural network (SNN) simulator built
+around physical RRAM synapses, analog integrate-and-fire neurons, and
+spike-timing-dependent plasticity (STDP). A Python 3 workflow converts MNIST
+images into compact spike sources, generates a Spectre-compatible netlist,
+runs transient learning, and turns the saved device states into static and
+animated conductance maps.
 
-The current Python flow converts MNIST images to configurable square spike
-grids, generates a Spectre-compatible network deck, runs transient learning,
-and produces static and animated RRAM conductance maps. The default
-configuration uses a **16×16 input grid (256 synapses per neuron)** and four
-laterally inhibited neurons.
+The implementation preserves the topology and learning logic of the original
+MATLAB/HSPICE project while adding a native Python/Spectre flow,
+resistance-adaptive programming pulses, asymmetric SET/RESET learning,
+competitive neuron freezing, selective waveform saving, and reusable result
+plotting.
 
-## Demo
-
-<p align="left">
-  <img src="neuron_weights_grid.gif" width="1000" alt="Animated RRAM conductance map for neuron 4">
+<p align="center">
+  <img src="figures/rram_weight_evolution.gif" width="650" alt="Animated 16 by 16 RRAM conductance map during STDP training">
 </p>
 
-<p align="left">
-  <em>Time-resolved RRAM conductance map for neuron 4. This representative
-  animation uses the supported 8×8 compatibility mode; new default runs
-  produce 16×16 maps.</em>
+<p align="center"><em>Time-resolved RRAM conductance map from a representative 16×16 training run.</em></p>
+
+## Main innovations
+
+- **Physical circuit-level learning:** RRAM conductance changes are produced by
+  the simulated voltage difference across each device, rather than by an
+  offline numerical weight update.
+- **Resistance-adaptive programming:** `adaptive_spikegen.va` changes the ramp
+  magnitude using live RRAM resistance so that the conductance update remains
+  much more uniform across the calibrated 0.9–1.1 nm initial-gap range.
+- **Tunable STDP asymmetry:** the positive-`delta-t` conductance-decrease branch
+  can be scaled independently with `--positive-dt-dg-ratio`.
+- **Circuit-level winner competition:** neurons count synapses that reach a
+  conductance criterion, select a winner, preserve its learned state, and reset
+  competitors through a shared arbitration event.
+- **Freeze-aware spike suppression:** a selected neuron not only freezes its
+  RRAM states; it also stops emitting post-synaptic programming spikes.
+- **Practical Spectre output control:** only required state signals and a
+  selected device waveform are saved by default, reducing raw-result size
+  without altering circuit dynamics.
+
+## The freeze process
+
+The freeze path is designed to prevent a trained winner from continuing to
+dominate the network or pushing its already-strong synapses to still higher
+conductance.
+
+```mermaid
+flowchart LR
+    A["RRAM conductance crosses<br/>--freeze-conductance-us"] --> B["Device contributes<br/>one reached count"]
+    B --> C{"Reached count exceeds<br/>--winner-rram-fraction?"}
+    C -- No --> D[Continue STDP learning]
+    C -- Yes --> E[Latch neuron_freeze]
+    E --> F["Hold every winner RRAM<br/>gap and conductance"]
+    E --> G["freeze_spikegen cancels ramp<br/>and forces vout_SRC to 0 V"]
+    E --> H[Pulse global arbitration bus]
+    H --> I["Reset all unfrozen<br/>competitor RRAMs and counts"]
+```
+
+Three thresholds have different meanings:
+
+| Parameter | Purpose | Default |
+|---|---|---:|
+| `--freeze-conductance-us` | Conductance at which one RRAM contributes a reached count | 12 µS |
+| `--winner-rram-fraction` | Fraction of reached RRAMs that must be strictly exceeded to select the neuron | 0.20 |
+| `freeze_threshold` | Voltage threshold used by Verilog-A modules to recognize the local freeze signal | 0.5 V |
+
+For the default 256-input network, a fraction of `0.20` selects a winner when
+the 52nd RRAM reaches the conductance criterion. `RRAM_NEURON_CONTROL` then
+latches the neuron-local `neuron_freeze` signal. That signal has two coordinated
+effects:
+
+1. `rram_neuron_freeze.va` sets the winner's gap derivative to zero, preserving
+   all learned conductances.
+2. `freeze_spikegen.va` cancels an active output ramp and smoothly gates
+   `vout_SRC` to exactly 0 V, so the frozen neuron can no longer generate
+   post-synaptic learning pulses or inhibit competitors with new spikes.
+
+The shared `global_training_event` is used only for winner arbitration and
+competitor reset. Spike suppression is driven by the persistent local freeze
+signal, so selecting one neuron does not incorrectly silence the entire
+network.
+
+## Demonstration results
+
+### Learned winner-neuron state
+
+<p align="center">
+  <img src="figures/winner_neuron_result.png" width="720" alt="Winner neuron RRAM conductance map, conductance evolution, and membrane voltage">
 </p>
 
-<p align="left">
-  <img src="neuron_4.png" width="420" alt="Animated RRAM conductance map for neuron 4">
+The static summary combines the final 16×16 conductance map, all device
+conductance trajectories, and the neuron's membrane/output activity. The
+animated figure at the top shows how this map develops over simulation time.
+
+### Voltage and conductance of one physical synapse
+
+<p align="center">
+  <img src="figures/rram_device_waveform.png" width="900" alt="Input spike, neuron output, voltage across one RRAM, and conductance evolution">
 </p>
 
-## What the project implements
+This diagnostic view connects the abstract STDP update to the simulated
+device: it plots the input spike, neuron output, differential voltage across
+one RRAM, and the resulting conductance trajectory.
 
-- MNIST resizing to a configurable square grid; 16×16 is the current default.
-- Rate-based Poisson spike encoding and compact PWL voltage-source generation.
-- Four analog neurons with 256 RRAM synapses per neuron by default.
-- Physical SET/RESET learning through paired pre- and post-synaptic waveforms.
-- Resistance-adaptive programming voltage for more uniform conductance change.
-- Configurable positive/negative STDP branch asymmetry.
-- Lateral inhibition for competitive, winner-take-all behavior.
-- Spectre APS acceleration, selected-signal saving, and uniform output strobing.
-- Static conductance/membrane plots and animated synaptic-weight maps.
-- Independent STDP timing and initial-gap characterization.
+### Two-dimensional physical STDP window
+
+<p align="center">
+  <img src="figures/stdp_conductance_window.png" width="1000" alt="RRAM conductance change versus timing difference and initial gap">
+</p>
+
+The standalone sweep measures `delta-G` versus `t_post - t_pre` and initial
+RRAM gap. The nearly overlapping curves across 0.9–1.1 nm illustrate the
+resistance-adaptive ramp calibration, while the positive and negative timing
+branches retain opposite update directions.
 
 ## Architecture
 
-For each input channel, the encoded spike drives two coupled paths:
+Each encoded pixel drives one synapse in every neuron:
 
-1. `adaptive_spikegen.va` shapes the pre-synaptic programming waveform using
-   the live RRAM resistance.
-2. `rram.va` updates the filament gap and exposes the current read resistance.
-3. `follow_res.va` applies that resistance to the neuron input path.
-4. The op-amp, capacitor, comparator, and pulse-generator network integrates
-   the weighted inputs and emits a post-synaptic spike.
-5. The post spike returns to all RRAM devices in that neuron and also drives
-   lateral NMOS inhibition of the other neurons.
-
-The same RRAM and spike-generator models are used by the full training flow
-and the standalone STDP-window sweep.
-
-## Requirements
-
-- Python 3.10 or newer
-- Cadence Spectre available on `PATH`, or supplied with `--spectre`
-- A valid Spectre license
-- Python packages listed in `requirements.txt`
-
-Python dependencies:
-
-- NumPy
-- Matplotlib
-- h5py
-- Pillow
-
-## Quick start
-
-Run all commands from the repository root.
-
-### 1. Create the Python environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
+```mermaid
+flowchart LR
+    M[MNIST image] --> P[Poisson encoder]
+    P --> V[Compact Spectre PWL inputs]
+    V --> A[Adaptive pre-spike generator]
+    A --> R[Physical RRAM array]
+    R --> N[Analog integrate-and-fire neuron]
+    N --> S[Freeze-aware post-spike generator]
+    S -->|STDP feedback| R
+    S -->|lateral inhibition| C[Competing neurons]
+    R --> W[Reached-count and winner control]
+    W -->|freeze| R
+    W -->|silence output| S
+    W -->|reset event| C
 ```
 
-### 2. Encode MNIST
-
-Generate the default 16×16, 256-channel input:
-
-```bash
-python3 main_encoding.py --image-size 16 --seed 1 --no-plot
-```
-
-The first run downloads the MNIST training images and labels if they are not
-already present. Cached resolution-specific datasets and spike trains are
-reused on later runs.
-
-Use `--rebuild-spikes` after changing the image size, sample duration, spike
-bin, maximum spike rate, or Poisson seed:
-
-```bash
-python3 main_encoding.py --image-size 16 --duration-us 100 --dt-us 1 --max-spikes 40 --targets 0 4 7 --samples-per-class 20 --seed 1 --rebuild-spikes --no-plot
-```
-
-### 3. Run the STDP network
-
-```bash
-python3 main_stdp.py --inputs 256 --neurons 4 --threads 8 --no-show
-```
-
-The transient duration is read automatically from the generated PWL header.
-The normal run uses a 0.2 µs maximum timestep and the same default saved-data
-period.
-
-For a smaller result file, keep the internal 0.2 µs limit but save once per
-microsecond:
-
-```bash
-python3 main_stdp.py --inputs 256 --timestep-us 0.2 --save-period-us 1 --threads 8 --no-show
-```
-
-For an exploratory run:
-
-```bash
-python3 main_stdp.py --inputs 256 --timestep-us 1 --save-period-us 1 --fast-sim --threads 8 --no-show
-```
-
-`--fast-sim` enables relaxed Spectre settings. Validate important spike counts,
-conductance maps, and final measurements against a normal run.
-
-### 4. Replot an existing result
-
-```bash
-python3 main_stdp.py --plot-existing --no-show
-```
-
-Generate only the animated weight maps:
-
-```bash
-python3 main_stdp.py --plot-existing --animation-only --animation-frames 80 --animation-fps 10 --no-show
-```
-
-## Original 8×8 compatibility mode
-
-The original 64-input configuration remains supported:
-
-```bash
-python3 main_encoding.py --image-size 8 --seed 1 --rebuild-spikes --no-plot
-python3 main_stdp.py --inputs 64 --neurons 4 --threads 8 --no-show
-```
-
-The image size and network input count must agree:
+The default network uses 256 inputs (a 16×16 image) and four neurons. Input
+count and encoded image size must agree:
 
 ```text
 number of inputs = image size × image size
 ```
 
-## STDP-window characterization
+## Requirements
 
-Sweep both pre/post timing and initial RRAM gap:
+- Python 3.10 or newer
+- Cadence Spectre available on `PATH` and a valid Spectre license
+- Python packages from `Full/requirements.txt`
+
+Create the environment from the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r Full/requirements.txt
+```
+
+## Quick start
+
+Run the simulation scripts from `Full/`:
+
+```bash
+cd Full
+```
+
+Generate a 16×16 MNIST spike dataset with samples grouped in target order:
+
+```bash
+python3 main_encoding.py --image-size 16 --duration-us 100 --dt-us 1 --max-spikes 40 --targets 2 4 7 8 --samples-per-class 20 --seed 1 --rebuild-spikes --no-plot
+```
+
+Run the default four-neuron Spectre training flow:
+
+```bash
+python3 main_stdp.py --inputs 256 --neurons 4 --timestep-us 0.2 --save-period-us 1 --base-gap 1e-9 --gap-sigma 0.01 --mem-threshold 0.40 --learning-rate-scale 0.20 --positive-dt-dg-ratio 0.40 --freeze-conductance-us 12 --winner-rram-fraction 0.20 --threads 8 --no-show
+```
+
+For a faster exploratory run, use a coarser timestep and relaxed Spectre
+settings, then validate important results with the normal command:
+
+```bash
+python3 main_stdp.py --inputs 256 --neurons 4 --timestep-us 1 --save-period-us 5 --fast-sim --threads 8 --no-show
+```
+
+Replot an existing result without rerunning Spectre:
+
+```bash
+python3 main_stdp.py --plot-existing --waveform-input 120 --waveform-neuron 1 --no-show
+```
+
+Characterize the STDP timing/gap surface:
 
 ```bash
 python3 plot_stdp_window.py --delta-min-us -4 --delta-max-us 4 --delta-step-us 0.25 --gap-min-nm 0.9 --gap-max-nm 1.1 --gap-step-nm 0.025 --plot-metric conductance --learning-rate-scale 0.20 --positive-dt-dg-ratio 0.40 --no-show
 ```
 
-The sweep writes:
-
-- `stdp_window/stdp_window.png`
-- `stdp_window/stdp_window.csv`
-- `stdp_window/stdp_window.scs`
-- `stdp_window/stdp_window.raw`
-- `stdp_window/spectre.log`
-
-Here, `delta-t = t_post - t_pre` at the falling threshold crossings that start
-the programming ramps. Positive `delta-t` means the pre-synaptic event occurs
-first.
-
-## Main configuration defaults
-
-| Setting | Default |
-|---|---:|
-| Input image | 16×16 |
-| Inputs per neuron | 256 |
-| Neurons | 4 |
-| Maximum Spectre timestep | 0.2 µs |
-| Saved-data period | same as timestep |
-| Base initial RRAM gap | 1.0 nm |
-| Gaussian gap variation | 1% |
-| Calibrated initial-gap range | 0.9–1.1 nm |
-| Membrane/comparator control | 0.40 V |
-| Adaptive voltage reference | −0.422 V at 263,244 Ω |
-| Adaptive magnitude limits | 0.01–0.50 V |
-| SET/RESET equalization exponents | 1.61 / 2.02 |
-| Equalization curvature | 0.30 |
-| Base learning-rate scale | 0.20 |
-| Positive-`delta-t` RESET ratio | 0.40 |
-| Spectre execution | APS, 8 threads |
-| Animation | 80 frames at 10 fps |
-
-Gaussian initial-gap samples are bounded to 0.9–1.1 nm, the range used to
-calibrate the adaptive conductance-update controller.
-
-## Output files
-
-The default training work directory is `temp/`:
-
-```text
-temp/
-├── stdp.sp                       generated Spectre-compatible network
-├── out.raw                       selected Nutmeg ASCII transient result
-├── spectre.log                   Spectre run log
-└── figures/
-    ├── neuron_1.png              final map, conductance traces, voltages
-    ├── neuron_1_weights.gif      animated conductance map
-    └── ...                       one PNG and GIF per neuron
-```
-
-Export a raw result to CSV:
-
-```bash
-python3 import_data.py temp/out.raw --csv temp/out.csv
-```
-
 ## Project layout
 
-| Path | Purpose |
+| Path | Role |
 |---|---|
-| `main_encoding.py` | MNIST loading, resizing, Poisson encoding, and PWL generation |
-| `main_stdp.py` | Network generation, Spectre execution, result parsing, and plotting |
-| `plot_stdp_window.py` | Physical STDP timing/gap sweep |
-| `import_data.py` | Spectre Nutmeg ASCII reader and CSV exporter |
-| `rram.va` | Electrothermal RRAM device and state-update model |
-| `adaptive_spikegen.va` | Resistance-aware synaptic programming waveform |
-| `spikegen.va` | Fixed post-synaptic programming ramp |
-| `follow_res.va` | Live RRAM-controlled read resistance |
-| `edge_to_pulse.va` | Comparator-edge to output-pulse conversion |
-| `cmp.sp` | Five-transistor comparator |
-| `TLV2372.LIB` | Op-amp macromodel |
-| `README_SPECTRE.md` | Detailed implementation and option notes |
-| `commands.txt` | Additional command-line examples |
+| `Full/main_encoding.py` | MNIST resizing, ordered sample selection, Poisson encoding, and compact PWL generation |
+| `Full/main_stdp.py` | Network generation, Spectre execution, raw-data parsing, and PNG/GIF plotting |
+| `Full/plot_stdp_window.py` | Independent timing and initial-gap sweep |
+| `Full/rram.va` | Base electrothermal RRAM model |
+| `Full/rram_neuron_freeze.va` | Resettable/freezeable RRAM state and reached-count contribution |
+| `Full/rram_neuron_control.va` | Winner selection, persistent freeze, and competitor-reset arbitration |
+| `Full/adaptive_spikegen.va` | Resistance-aware synaptic programming waveform |
+| `Full/freeze_spikegen.va` | Post-synaptic waveform with persistent freeze gating |
+| `Full/spikegen.va` | Original two-terminal generator retained for isolated STDP sweeps |
+| `Full/import_data.py` | Spectre Nutmeg ASCII reader and CSV exporter |
+| `Full/commands.txt` | Extended command examples and parameter notes |
 
-The MATLAB and HSPICE files are retained as references for the original flow.
+Generated training artifacts are written to `Full/temp/`, including the
+Spectre deck, raw output, run log, static PNG summaries, and animated RRAM
+weight maps. See [Full/README_SPECTRE.md](Full/README_SPECTRE.md) for detailed
+implementation and simulator-option notes.
 
-## Notes and limitations
+## Current scope
 
-- A 16×16, four-neuron run contains 1,024 RRAM devices and can be
-  computationally expensive.
-- Increasing `--save-period-us` reduces raw-result size without relaxing the
-  internal solver limit.
-- Keep the save period at or below the 1 µs output-spike width when spike
-  visibility is required.
-- The current generator samples one initial gap per neuron and applies it to
-  that neuron's synapses; it does not yet assign independent initial mismatch
-  to every RRAM device.
-- The project currently demonstrates unsupervised conductance learning. A
-  complete label-assignment, inference, and held-out accuracy stage is not yet
-  included.
-- Generated datasets, raw simulation files, and full figure sets can be large
-  and normally should not be committed.
-
-## Adding the demo to Git
-
-The README expects this exact repository-relative path:
-
-```text
-temp/figures/neuron_4_weights.gif
-```
-
-If your ignore rules exclude generated GIFs, add this demo explicitly:
-
-```bash
-git add -f temp/figures/neuron_4_weights.gif
-```
+The framework demonstrates device- and circuit-level online learning. It does
+not yet include a held-out inference stage, automatic neuron-to-class mapping,
+or a classification-accuracy benchmark. Long Spectre runs should be treated as
+experiments: preserve the generated deck and log, and compare fast-mode results
+against the normal accuracy settings before drawing quantitative conclusions.
